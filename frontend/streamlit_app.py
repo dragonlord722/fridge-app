@@ -1,119 +1,54 @@
 import streamlit as st
-from PIL import Image
-from google import genai
-import json
-import logging
+import requests
+import base64
 
-# --- NETWORK LOGGING SETUP ---
-# Forces the underlying HTTP library to print all network traffic to your terminal
-logging.basicConfig(
-    format="%(levelname)s [%(name)s] %(message)s", 
-    level=logging.DEBUG
-)
-logging.getLogger("httpx").setLevel(logging.DEBUG)
-# -----------------------------
+# Your live Cloud Run Microservice URL
+BACKEND_URL = "https://fridge-backend-service-845166114793.us-central1.run.app"
 
-# --- SECURITY: The Password Bouncer ---
-def check_password():
-    """Returns `True` if the user had the correct password."""
-    def password_entered():
-        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password in session state securely
-        else:
-            st.session_state["password_correct"] = False
+st.set_page_config(page_title="AI Fridge Chef", page_icon="🍳")
+st.title("🍳 AI Fridge Chef")
+st.markdown("**Enterprise Microservice Edition** 🚀")
 
-    if "password_correct" not in st.session_state:
-        # First run, show input for password.
-        st.text_input("Enter the app password to continue", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        # Password incorrect, show input + error.
-        st.text_input("Enter the app password to continue", type="password", on_change=password_entered, key="password")
-        st.error("😕 Password incorrect")
-        return False
-    else:
-        # Password correct.
-        return True
+st.write("Upload a picture of your fridge, and our cloud backend will generate recipes!")
 
-# --- MAIN APP SETUP ---
-st.set_page_config(page_title="AI Recipe Assistant", page_icon="🍳", layout="wide")
+uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
-# Stop the app completely if the password is not entered
-if not check_password():
-    st.stop()
+if uploaded_file is not None:
+    st.image(uploaded_file, caption="Your Fridge", use_column_width=True)
 
-# Initialize Gemini Client 
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-
-st.title("🍳 What's in my fridge?")
-st.write("Upload a picture of your refrigerator, and I'll suggest a recipe!")
-
-# --- UI LAYOUT ---
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Your Fridge", use_container_width=True)
-        analyze_button = st.button("Analyze Fridge", type="primary", use_container_width=True)
-
-with col2:
-    if uploaded_file is not None and analyze_button:
-        with st.spinner("Analyzing ingredients and generating recipes..."):
+    if st.button("Generate Recipes"):
+        with st.spinner("Sending image to Cloud Run backend..."):
             try:
-                # The exact instructions for the AI
-                prompt = """You are a culinary AI assistant. Analyze the provided image of a refrigerator or ingredients. 
-                Return a valid JSON object with exactly three keys:
-                1. 'ingredients': A list of strings of identified food items.
-                2. 'missing_essentials': A list of 2-3 common staple items that seem to be missing.
-                3. 'recipes': A list of 2-3 suggested pure vegetarian Indian or fusion recipes based heavily on the found ingredients. Each recipe should be an object with 'name' and 'cuisine' keys."""
+                # 1. Convert the image to Base64
+                image_bytes = uploaded_file.getvalue()
+                base64_string = base64.b64encode(image_bytes).decode('utf-8')
                 
-                # Make the API Call
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=[image, prompt],
-                    config={"response_mime_type": "application/json"}
-                )
+                # 2. Package for Pydantic
+                payload = {"image_base64": base64_string}
                 
-                # --- PRINT FULL PAYLOAD TO TERMINAL ---
-                # Dumps the entire response object (including token counts) to your terminal
-                print("\n" + "="*50)
-                print("GEMINI API RESPONSE PAYLOAD & METADATA:")
-                print("="*50)
-                print(response.model_dump_json(indent=4))
-                print("="*50 + "\n")
-                # ---------------------------------------
-
-                # Parse the JSON string into a Python dictionary
-                result = json.loads(response.text)
+                # 3. Call the Cloud Run API
+                response = requests.post(f"{BACKEND_URL}/analyze", json=payload)
                 
-                # --- POLISHED UI RENDERING ---
-                st.success("Analysis Complete!")
-                
-                ing_col, miss_col = st.columns(2)
-                
-                with ing_col:
-                    st.subheader("🥬 Found Ingredients")
+                # 4. Handle the response
+                if response.status_code == 200:
+                    result = response.json()
+                    st.success("Recipes generated successfully!")
+                    
+                    st.markdown("### 🛒 Ingredients Found:")
                     for item in result.get("ingredients", []):
-                        st.markdown(f"- {item}")
+                        st.write(f"- {item}")
                         
-                with miss_col:
-                    st.subheader("🛒 Missing Essentials")
-                    for item in result.get("missing_essentials", []):
-                        # Generate dynamic search links for missing items
-                        search_url = f"https://www.wholefoodsmarket.com/search?text={item.replace(' ', '+')}"
-                        st.markdown(f"- {item} [🛒]({search_url})")
-                
-                st.divider()
-                
-                st.subheader("👨‍🍳 Recipe Suggestions")
-                for recipe in result.get("recipes", []):
-                    # Use a container to create a "card" look for the recipes
-                    with st.container(border=True):
-                        st.markdown(f"#### {recipe['name']}")
-                        st.caption(f"Cuisine: {recipe['cuisine']}")
+                    st.markdown("### ⚠️ Missing Essentials:")
+                    for missing in result.get("missing_essentials", []):
+                        st.write(f"- {missing}")
                         
-            except Exception as e:
-                st.error(f"An error occurred during analysis: {e}")
+                    st.markdown("### 👨‍🍳 Recipe Suggestions:")
+                    for recipe in result.get("recipes", []):
+                        st.write(f"**{recipe.get('name', 'Recipe')}** ({recipe.get('cuisine', 'Unknown')})")
+                        
+                else:
+                    st.error(f"Backend Error (Status {response.status_code})")
+                    st.write(response.text)
+                    
+            except requests.exceptions.RequestException as e:
+                st.error(f"Failed to connect to the backend microservice: {e}")
