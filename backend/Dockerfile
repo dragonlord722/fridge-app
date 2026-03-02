@@ -1,18 +1,18 @@
-ENV PYTHONUNBUFFERED=1
+# 1. Start with the Base Image (MUST BE FIRST)
 FROM python:3.11-slim
 
-# Set the working directory inside the container
+# 2. Set Environment Variables (Unbuffers logs for Cloud Run)
+ENV PYTHONUNBUFFERED=1
+
+# 3. Set the working directory
 WORKDIR /app
 
-# Copy requirements first (for better caching)
+# 4. Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the actual code
-# If your local folder is backend/app/, this copies 'app/' into '/app/app/'
+# 5. Copy your application code
 COPY . .
 
-# Start uvicorn
-# We use 'app.main:app' because 'app' is the folder and 'main' is the file
-# Correct CMD for Cloud Run
+# 6. Start the server
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
