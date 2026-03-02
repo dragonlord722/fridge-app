@@ -1,61 +1,89 @@
-# AI Recipe & Inventory Assistant (Milestone 1: PoC)
+🍳 AI Fridge Chef: Enterprise Applied AI Platform
 
-An intelligent, multimodal web application that analyzes images of refrigerator contents to extract available ingredients, identify missing staples, and generate customized culinary recipes. 
+API Documentation: https://fridge-backend-service-845166114793.us-central1.run.app/docs
+🚀 Project Evolution
 
-This repository currently represents **Milestone 1**, a monolithic Proof of Concept (PoC) designed for rapid validation of vision-language model (VLM) capabilities and strict structured output enforcement.
+This platform has evolved from a monolithic Python prototype (Milestone 1) into a hardened, decoupled microservices architecture (Milestone 2). By separating the presentation layer from the inference logic, the system achieves enterprise-grade security, independent scalability, and zero-trust communication.
+🏗️ System Architecture (Current: Milestone 2)
 
+The system is designed as a Stateless Microservice architecture deployed on Google Cloud Platform (GCP).
 
+    Frontend (Presentation Layer): Streamlit (Hosted on Streamlit Community Cloud). Acts as a "dumb" client that manages image uploads and renders JSON responses.
 
-## 🏗️ System Architecture (Current State)
-* **Frontend & State Management:** Streamlit
-* **AI/Inference Engine:** Google Gemini 2.5 Flash (via Google GenAI SDK)
-* **Output Parsing:** Enforced `application/json` MIME type for deterministic contract rendering.
+    Backend (Inference Layer): FastAPI (Containerized with Docker, deployed on Google Cloud Run). Handles image processing, LLM orchestration, and security validation.
 
-### Engineering Highlights
-* **Multimodal Extraction:** Leverages Gemini 2.5 Flash to process raw image data and extract conceptual food items, even in cluttered or poorly lit refrigerator environments.
-* **Structured LLM Output:** Bypasses conversational AI fluff. The model is strictly prompted and configured at the API level to return a predefined JSON schema, ensuring the application frontend does not crash due to malformed string parsing.
-* **Cost & Latency Optimization:** Utilizing the Flash variant of the model ensures high-speed inference suitable for synchronous web requests while remaining highly cost-efficient.
-* **Application-Layer Security:** Implements a lightweight session-state "bouncer" to protect API quotas during public/shared testing, securely reading from environment variables.
+    AI Engine: Google Gemini 2.5 Flash (Multimodal VLM).
 
-## 🚀 Features
-* **Zero-Click Inventory:** Upload a photo and receive a parsed list of detected ingredients.
-* **Smart Contextual Gap Analysis:** Identifies common staples that are missing based on the detected context (e.g., noticing missing aromatics like onions/garlic).
-* **Dynamic Deep Linking:** Automatically generates localized e-commerce search URLs (Whole Foods) for missing ingredients.
-* **Custom Recipe Generation:** Currently tuned for pure vegetarian Indian and Fusion cuisines. 
+    CI/CD: GitHub Actions with Workload Identity Federation (WIF) for secure, keyless GCP deployments.
 
-## 💻 Local Development Setup
+🛡️  Engineering & Security Highlights
 
-### Prerequisites
-* Python 3.9+
-* A free Google Gemini API Key
+    Microservice Decoupling: Migrated from a stateful monolith to a stateless architecture. This separation allow the heavy UI processing and the lightweight AI orchestration to scale independently.
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/dragonlord722/fridge-app
-   cd fridge-app
-   ```
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+    Zero-Trust Security: Implemented a custom X-Portfolio-Token header validation to ensure only authorized clients can invoke high-cost AI operations.
 
-3. Configure Secrets:
-Streamlit requires a local secrets file. Create a hidden .streamlit directory and a secrets.toml file inside it:
+    Rate Limiting & Cost Control: Integrated SlowAPI with a "Fixed Window" algorithm (5 requests/min per IP) to protect API quotas from automated abuse or accidental "token burn".
 
-   ```bash
-   mkdir -p .streamlit
-   touch .streamlit/secrets.toml
-   ```
-   Add the following credentials to .streamlit/secrets.toml:
-   Ini, TOML
+    CORS Policy Enforcement: Configured the FastAPI backend to strictly allow requests only from the authorized Streamlit domain, mitigating cross-site request forgery.
 
-   GEMINI_API_KEY = "your_google_api_key_here"
-   APP_PASSWORD = "your_local_testing_password"
+    Payload Optimization: Engineered the frontend to compress and base64-encode image payloads, significantly reducing network latency and improving request reliability.
 
-   (Note: Ensure .streamlit/ is added to your .gitignore to prevent credential leakage).
+🗺️ Future Roadmap 
+Milestone 3: AI Reliability & "Evals"
 
-   4.  Run the Application:
-   ```bash
-   streamlit run app.py
-   ```
+    Goal: Move from "it works most of the time" to quantifiable engineering metrics.
+
+    Implementation: Integration of evaluation frameworks (e.g., Promptfoo) into the CI pipeline to track hallucination rates and JSON schema adherence across 50+ varied fridge scenarios.
+
+    Prompt Guardrails: Implementing specific JSON error states for non-food images (e.g., preventing the model from hallucinating "rubber salad" recipes if a user uploads a photo of a tire).
+
+Milestone 4: Operational Excellence & Observability
+
+    Multi-Model Routing (The Adapter Pattern): Implementing an abstract LLMProvider interface to allow seamless switching (and fallback) between Gemini, GPT-4o, and Claude 3.5 Sonnet.
+
+    Observability: Instrumenting the backend to log critical LLM metrics: token usage (prompt vs. completion), p99 latency percentiles, and downstream API timeouts.
+
+    Token Budgets: Introducing a Firestore "ledger" to track and cap total LLM spend per session ID/IP address.
+
+Milestone 5: Personalization & Mobile Expansion
+
+    Identity (OAuth 2.0): Integrating Google Sign-In for user accounts and history tracking.
+
+    Persistence: Two-tier storage using Google Cloud Storage (GCS) for raw image blobs and Firestore for structured recipe metadata.
+
+    Android Client: Developing a native Kotlin/Compose mobile app that consumes the same Cloud Run REST API, showcasing multi-client interoperability.
+
+💻 Local Development Setup
+Prerequisites
+
+    Python 3.9+
+
+    GCP Service Account Key (configured in Streamlit Secrets)
+
+    A Google Gemini API Key
+
+Installation
+
+    Clone and Navigate:
+    Bash
+
+    git clone https://github.com/dragonlord722/fridge-app
+    cd fridge-app
+
+    Backend Setup:
+    Bash
+
+    cd backend
+    pip install -r requirements.txt
+    X_PORTFOLIO_TOKEN=your_secret uvicorn app.main:app --reload
+
+    Frontend Setup:
+    Bash
+
+    cd frontend
+    pip install -r requirements.txt
+    streamlit run streamlit_app.py
+
+📄 License
+
+Distributed under the MIT License. See LICENSE for more information.
