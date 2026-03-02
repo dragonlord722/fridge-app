@@ -1,39 +1,38 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from google import genai
 import os
-import json
-import base64
-from io import BytesIO
-from PIL import Image
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel
 
-# 1. THE ROUTER (FastAPI)
-# We initialize the FastAPI application. This is the engine that will handle HTTP requests.
-app = FastAPI(
-    title="Fridge AI Backend", 
-    description="Stateless microservice for multimodal recipe generation",
-    version="1.0"
+# 1. Initialize Rate Limiter (5 requests per minute per IP)
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# 2. CORS Policy: Replace with your actual Streamlit URL!
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://ravi-fridge-chef.streamlit.app"], 
+    allow_methods=["POST"],
+    allow_headers=["*"],
 )
 
-# 2. THE CONTRACT (Pydantic)
-# This defines the EXACT schema we expect from the frontend. 
-# If a request hits our API without the "image_base64" key, Pydantic intercepts it 
-# and returns a 422 Unprocessable Entity error automatically. We don't have to write validation logic.
-class ImagePayload(BaseModel):
-    image_base64: str
+# 3. Custom Header Security Middleware
+PORTFOLIO_TOKEN = os.environ.get("X_PORTFOLIO_TOKEN", "fallback-secret-for-local-dev")
 
-def decode_image(base64_string: str) -> Image.Image:
-    """Helper function: Safely decodes a base64 string into a PIL Image."""
-    try:
-        # Frontends often prepend metadata like "data:image/jpeg;base64,". We strip that out if it exists.
-        if "," in base64_string:
-            base64_string = base64_string.split(",")[1]
-            
-        image_data = base64.b64decode(base64_string)
-        return Image.open(BytesIO(image_data))
-    except Exception as e:
-        # If the string isn't a valid image, we catch it here before it ever reaches the LLM.
-        raise ValueError("Invalid base64 image encoding")
+@app.middleware("http")
+async def verify_portfolio_token(request: Request, call_next):
+    # Only protect the analyze endpoint
+    if request.url.path == "/analyze":
+        token = request.headers.get("X-Portfolio-Token")
+        if token != PORTFOLIO_TOKEN:
+            return HTTPException(status_code=401, detail="Unauthorized: Invalid Portfolio Token")
+    return await call_next(request)
+
+# ... (rest of your /analyze route logic remains the same)
 
 # 3. THE ENDPOINT
 # We define a POST route. The `payload: ImagePayload` argument tells FastAPI to use our Pydantic contract.
