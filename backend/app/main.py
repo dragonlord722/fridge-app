@@ -10,8 +10,28 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from google import genai
+import logging
+from dotenv import load_dotenv
 
-# --- 1. INITIALIZATION & RATE LIMITER ---
+# Load the .env file explicitly
+load_dotenv()
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+
+def load_prompt(version: str):
+    # Ensure we look in the 'backend/prompts' directory relative to this file
+    base_path = os.path.dirname(os.path.dirname(__file__))
+    prompt_path = os.path.join(base_path, "prompts", f"{version}.md")
+    
+    try:
+        with open(prompt_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        logging.error(f"❌ Prompt file not found at {prompt_path}")
+        return "Analyze this fridge image and return JSON." # Safe fallback
+
+# --- 1. INITIALIZATION ---
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Fridge AI Backend")
 app.state.limiter = limiter
@@ -20,96 +40,72 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # --- 2. CORS POLICY ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ravi-fridge-chef.streamlit.app"], 
+    allow_origins=["*"], # Staff Tip: Use "*" for local dev, restrict in prod
     allow_methods=["POST"],
     allow_headers=["*"],
 )
 
-# --- 3. DATA MODELS & HELPERS ---
+# --- 3. DATA MODELS ---
 class ImagePayload(BaseModel):
     image_base64: str
 
-def decode_image(base64_string: str) -> Image.Image:
-    try:
-        if "," in base64_string:
-            base64_string = base64_string.split(",")[1]
-        image_data = base64.b64decode(base64_string)
-        return Image.open(BytesIO(image_data))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid base64 image encoding")
-
 # --- 4. SECURITY MIDDLEWARE ---
-PORTFOLIO_TOKEN = os.environ.get("X_PORTFOLIO_TOKEN", "fallback-secret-for-local-dev")
+PORTFOLIO_TOKEN = os.getenv("X_PORTFOLIO_TOKEN", "fallback-secret-for-local-dev")
 
 @app.middleware("http")
 async def verify_portfolio_token(request: Request, call_next):
     if request.url.path == "/analyze":
         token = request.headers.get("X-Portfolio-Token")
         if token != PORTFOLIO_TOKEN:
-            # FIX: Must RAISE, not return
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Unauthorized: Invalid Portfolio Token"
+            # We return a JSONResponse here because Middleware 
+            # handles exceptions differently than endpoints
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized: Invalid Portfolio Token"}
             )
-    response = await call_next(request)
-    return response
+    return await call_next(request)
 
 # --- 5. THE ENDPOINT ---
 @app.post("/analyze")
-@limiter.limit("5/minute") # FIX: Added the actual rate limit decorator
-async def analyze_fridge(payload: ImagePayload, request: Request): # Added request param for Limiter
-    api_key = os.environ.get("GEMINI_API_KEY")
+@limiter.limit("5/minute")
+async def analyze_image(request: Request, payload: ImagePayload): # FIX: Use ImagePayload
+    # 1. Load Prompt Version
+    system_prompt = load_prompt(os.getenv("PROMPT_VERSION", "v2_guardrail"))
+
+    # 2. Check API Key
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="LLM API Key not configured.")
-    
+
     try:
-        image = decode_image(payload.image_base64)
+        # 3. Process Base64 String
+        base64_str = payload.image_base64
+        if "," in base64_str:
+            base64_str = base64_str.split(",")[1]
+        
+        image_data = base64.b64decode(base64_str)
+        image = Image.open(BytesIO(image_data))
+
+        # 4. Call Gemini
         client = genai.Client(api_key=api_key)
         
-        prompt = """
-You are a highly precise Culinary Vision Engine. Your task is to analyze the provided image 
-and return a strictly formatted JSON response.
-
-### STEP 1: VALIDATION
-Determine if the image contains food, kitchen ingredients, or a refrigerator interior. 
-- If the image is absolutely not food or a kitchen, you **MUST** set 'is_valid_fridge_image' to false. Do not attempt to find food in documents, screenshots of software, or vehicles.
-- If the image is NOT food-related (e.g., a car, a pet, a person, electronics, or blurry/unidentifiable), 
-  set 'is_valid_fridge_image' to false and provide a helpful 'error_message'.
-- If the image IS food-related, set 'is_valid_fridge_image' to true.
-
-### STEP 2: EXTRACTION (Only if is_valid_fridge_image is true)
-1. 'ingredients': List all identifiable food items.
-2. 'missing_essentials': Identify 2-3 staples typically found in an Indian kitchen that are absent.
-3. 'recipes': Suggest 2-3 pure vegetarian Indian or Fusion recipes. Each must have 'name' and 'cuisine'.
-
-### OUTPUT FORMAT
-Return ONLY a JSON object with this exact structure:
-{
-  "is_valid_fridge_image": boolean,
-  "error_message": string or null,
-  "ingredients": list,
-  "missing_essentials": list,
-  "recipes": [{"name": string, "cuisine": string}]
-}
-"""
-        
+        # Note: Ensure you are using the correct model string for your SDK version
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[image, prompt],
-            config={"response_mime_type": "application/json"} 
+            model='gemini-2.0-flash', 
+            contents=[image, system_prompt],
+            config={"response_mime_type": "application/json"}
         )
-        
+
         response_data = json.loads(response.text)
         
-        # Staff Tip: Even if the LLM fails to return a key, 
-        # we provide defaults to keep the Frontend stable.
         return {
             "is_valid_fridge_image": response_data.get("is_valid_fridge_image", False),
-            "error_message": response_data.get("error_message", "Invalid image provided."),
+            "error_message": response_data.get("error_message", ""),
             "ingredients": response_data.get("ingredients", []),
             "missing_essentials": response_data.get("missing_essentials", []),
             "recipes": response_data.get("recipes", [])
         }
-        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Prediction Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="AI processing failed.")
