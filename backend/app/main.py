@@ -66,10 +66,32 @@ async def analyze_fridge(payload: ImagePayload, request: Request): # Added reque
         image = decode_image(payload.image_base64)
         client = genai.Client(api_key=api_key)
         
-        prompt = """You are a culinary AI assistant. Analyze the image. 
-        Return JSON with: ingredients (list), missing_essentials (list), 
-        recipes (list of objects with 'name' and 'cuisine'). 
-        Focus on pure vegetarian Indian or fusion."""
+        prompt = """
+You are a highly precise Culinary Vision Engine. Your task is to analyze the provided image 
+and return a strictly formatted JSON response.
+
+### STEP 1: VALIDATION
+Determine if the image contains food, kitchen ingredients, or a refrigerator interior. 
+- If the image is absolutely not food or a kitchen, you **MUST** set 'is_valid_fridge_image' to false. Do not attempt to find food in documents, screenshots of software, or vehicles.
+- If the image is NOT food-related (e.g., a car, a pet, a person, electronics, or blurry/unidentifiable), 
+  set 'is_valid_fridge_image' to false and provide a helpful 'error_message'.
+- If the image IS food-related, set 'is_valid_fridge_image' to true.
+
+### STEP 2: EXTRACTION (Only if is_valid_fridge_image is true)
+1. 'ingredients': List all identifiable food items.
+2. 'missing_essentials': Identify 2-3 staples typically found in an Indian kitchen that are absent.
+3. 'recipes': Suggest 2-3 pure vegetarian Indian or Fusion recipes. Each must have 'name' and 'cuisine'.
+
+### OUTPUT FORMAT
+Return ONLY a JSON object with this exact structure:
+{
+  "is_valid_fridge_image": boolean,
+  "error_message": string or null,
+  "ingredients": list,
+  "missing_essentials": list,
+  "recipes": [{"name": string, "cuisine": string}]
+}
+"""
         
         response = client.models.generate_content(
             model='gemini-2.5-flash',
@@ -77,7 +99,17 @@ async def analyze_fridge(payload: ImagePayload, request: Request): # Added reque
             config={"response_mime_type": "application/json"} 
         )
         
-        return json.loads(response.text)
+        response_data = json.loads(response.text)
+        
+        # Staff Tip: Even if the LLM fails to return a key, 
+        # we provide defaults to keep the Frontend stable.
+        return {
+            "is_valid_fridge_image": response_data.get("is_valid_fridge_image", False),
+            "error_message": response_data.get("error_message", "Invalid image provided."),
+            "ingredients": response_data.get("ingredients", []),
+            "missing_essentials": response_data.get("missing_essentials", []),
+            "recipes": response_data.get("recipes", [])
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -11,10 +11,14 @@ PORTFOLIO_TOKEN = st.secrets.get("X_PORTFOLIO_TOKEN", "")
 
 def compress_image(uploaded_file):
     img = Image.open(uploaded_file)
-    # Resize so the max dimension is 1024px
+    
+    # NEW: Convert RGBA (transparency) to RGB (solid background)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+        
     img.thumbnail((1024, 1024)) 
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85) # Convert to optimized JPEG
+    img.save(buf, format="JPEG", quality=85) 
     return buf.getvalue()
 
 
@@ -55,23 +59,29 @@ if uploaded_file is not None:
                 # 4. Result Processing
                 if response.status_code == 200:
                     result = response.json()
-                    st.success("Recipes generated successfully!")
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("### 🛒 Found")
-                        for item in result.get("ingredients", []):
-                            st.write(f"- {item}")
-                    with col2:
-                        st.markdown("### ⚠️ Missing")
-                        for missing in result.get("missing_essentials", []):
-                            st.write(f"- {missing}")
+                    # 1. Check the Guardrail Flag first
+                    if not result.get("is_valid_fridge_image", True):
+                        st.error(f"🛑 **Validation Error:** {result.get('error_message')}")
+                        st.info("Please upload a clear photo of your refrigerator or food ingredients.")
+                    else:
+                        # 2. Only show the ingredients/recipes if valid
+                        st.success("Recipes generated successfully!")
                         
-                    st.divider()
-                    st.markdown("### 👨‍🍳 Chef's Recommendations")
-                    for recipe in result.get("recipes", []):
-                        with st.expander(f"📖 {recipe.get('name', 'Recipe')}"):
-                            st.write(f"**Cuisine:** {recipe.get('cuisine', 'Fusion')}")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.subheader("🛒 Found")
+                            for item in result.get("ingredients", []):
+                                st.write(f"- {item}")
+                        
+                        with col2:
+                            st.subheader("⚠️ Missing")
+                            for item in result.get("missing_essentials", []):
+                                st.write(f"- {item}")
+
+                        st.divider()
+                        st.subheader("👨‍🍳 Chef's Recommendations")
+                        # ... rest of your recipe display logic ...
                 
                 elif response.status_code == 429:
                     st.warning("Rate limit exceeded. Please wait a minute before trying again.")
