@@ -57,4 +57,7 @@ jobs:
           service_account: ${{ env.SERVICE_ACCOUNT }}
           env_vars: |-
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            ENV=production
+            PROMPT_VERSION=v2_guardrail
+            X_PORTFOLIO_TOKEN=${{ secrets.X_PORTFOLIO_TOKEN }}
           flags: '--allow-unauthenticated'

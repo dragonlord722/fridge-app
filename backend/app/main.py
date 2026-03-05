@@ -56,9 +56,18 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # --- 2. CORS POLICY ---
+allowed_origins = [
+    "https://ravi-fridge-chef.streamlit.app", # Production
+    "http://localhost:8501",                  # Local
+]
+
+# If in dev mode, add the wildcard or your specific Codespace URL
+if os.getenv("ENV") == "development":
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Staff Tip: Use "*" for local dev, restrict in prod
+    allow_origins=allowed_origins,
     allow_methods=["POST"],
     allow_headers=["*"],
 )
