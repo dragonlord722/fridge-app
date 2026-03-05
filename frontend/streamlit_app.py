@@ -62,7 +62,45 @@ def main():
                             st.error(f"🛑 **Validation Error:** {result.get('error_message')}")
                         else:
                             st.success("Recipes generated!")
-                            # ... (render your columns/results here)
+                            
+                            # 1. Ingredients & Essentials Columns
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.subheader("🛒 Found Ingredients")
+                                ingredients = result.get("ingredients", [])
+                                if ingredients:
+                                    for item in ingredients:
+                                        st.write(f"- {item}")
+                                else:
+                                    st.info("No specific ingredients identified.")
+                            
+                            with col2:
+                                st.subheader("⚠️ Missing Essentials")
+                                missing = result.get("missing_essentials", [])
+                                if missing:
+                                    for item in missing:
+                                        st.write(f"- {item}")
+                                else:
+                                    st.write("You're all set!")
+
+                            st.divider()
+
+                            # 2. Recipe Recommendations
+                            st.subheader("👨‍🍳 Chef's Recommendations")
+                            recipes = result.get("recipes", [])
+                            if recipes:
+                                for recipe in recipes:
+                                    with st.expander(f"📖 {recipe.get('name', 'Untitled Recipe')}"):
+                                        st.write(f"**Description:** {recipe.get('description', 'No description provided.')}")
+                                        
+                                        st.write("**Ingredients needed:**")
+                                        for req in recipe.get("ingredients_needed", []):
+                                            st.write(f"- {req}")
+                                            
+                                        st.write("**Instructions:**")
+                                        st.write(recipe.get("instructions", "Follow standard cooking procedures."))
+                            else:
+                                st.warning("No specific recipes could be generated for these items.")
                     else:
                         st.error(f"Backend Error: {response.status_code}")
                         
